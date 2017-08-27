@@ -17,6 +17,7 @@ import (
 	"strings"
 	"sync"
 
+	shortcut "github.com/erikh/go-steam-shortcut"
 	"github.com/mitchellh/go-homedir"
 	"github.com/sselph/scraper/ds"
 	"github.com/sselph/scraper/gdb"
@@ -396,27 +397,13 @@ func scrape(ctx context.Context, sources []ds.DS, xmlOpts *rom.XMLOpts, gameOpts
 	if err != nil {
 		return err
 	}
+
 	gl := &rom.GameListXML{}
-	if *appendOut || *refreshOut {
-		f, err := os.Open(*outputFile)
-		if err != nil {
-			log.Printf("ERR: Can't open %s, creating new file. error %q", *outputFile, err)
-		} else {
-			decoder := xml.NewDecoder(f)
-			if err := decoder.Decode(gl); err != nil {
-				log.Printf("ERR: Can't open %s, creating new file. error %q", *outputFile, err)
-			}
-			f.Close()
-		}
-	}
 	cerr := crawlROMs(ctx, gl, sources, xmlOpts, gameOpts)
 	if cerr != nil && cerr != errUserCanceled {
 		return cerr
 	}
-	output, err := xml.MarshalIndent(gl, "  ", "    ")
-	if err != nil {
-		return err
-	}
+
 	if len(gl.GameList) == 0 {
 		return cerr
 	}
@@ -424,11 +411,40 @@ func scrape(ctx context.Context, sources []ds.DS, xmlOpts *rom.XMLOpts, gameOpts
 	if err != nil {
 		return err
 	}
-	err = ioutil.WriteFile(*outputFile, append([]byte(xml.Header), output...), 0664)
+
+	w, err := shortcut.NewWriter(*outputFile)
 	if err != nil {
 		return err
 	}
-	return cerr
+
+	defer w.Close()
+
+	for _, item := range gl.GameList {
+		imageAbs, err := filepath.Abs(item.Image)
+		if err != nil {
+			return err
+		}
+
+		pathAbs, err := filepath.Abs(item.Path)
+		if err != nil {
+			return err
+		}
+
+		s := &shortcut.Shortcut{
+			AppName:       item.GameTitle,
+			Icon:          imageAbs,
+			Exe:           `"C:\Emulators\snes9x\snes9x.exe"`,
+			StartDir:      `"C:\Emulators\snes9x\"`,
+			LaunchOptions: fmt.Sprintf(`"%s"`, pathAbs),
+			Tags:          []string{"snes"},
+		}
+
+		if err := w.Write(s); err != nil {
+			return err
+		}
+	}
+
+	return nil
 }
 
 // System represents a single system in es_systems.cfg
